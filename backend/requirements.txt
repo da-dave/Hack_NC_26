@@ -1,3 +1,4 @@
-pandas
 google-genai
+pandas
+pydantic
 python-dotenv
