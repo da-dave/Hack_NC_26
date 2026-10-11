@@ -21,11 +21,11 @@ Our goal is to make food donation more accessible, efficient, and community-driv
 
 ## Tech Stack
 
-- **Python & pandas** — Backend processing, inventory management, and pantry matching
-- **Google Gemini API** — Natural language processing and structured donation extraction
-- **Pydantic** — Structured data validation
-- **Photon / Spectrum** — iMessage integration for donor and pantry communication
-- **CSV** — Prototype database for pantry inventory, donors, and donation pledges
+- **Python & pandas** - Backend processing, inventory management, and pantry matching
+- **Google Gemini API** - Natural language processing and structured donation extraction
+- **Pydantic** - Structured data validation
+- **Photon / Spectrum** —-iMessage integration for donor and pantry communication
+- **CSV** - Prototype database for pantry inventory, donors, and donation pledges
 
 ## Key Features
 
