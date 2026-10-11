@@ -35,6 +35,8 @@ class GeminiAdapterTests(unittest.TestCase):
             pd.DataFrame([{'pantry_id':1,'food_item':'Canned beans','quantity_on_hand':0,'target_quantity':100,'unit':'cans'}]).to_csv(path/'inventory.csv', index=False)
             app=PantryPulse(path)
             app.on_message(handle='donor',space_id='s',message_id='1',text='JOIN DONOR')
+            # Finish/reset guided registration before testing an unsolicited donation.
+            app.lookup('participants', handle='donor')['step'] = ''
             self.assertTrue(should_interpret(app,'donor','I have 24 cans of beans'))
             self.assertFalse(should_interpret(app,'donor','STATUS'))
             self.assertFalse(should_interpret(app,'donor','Hi'))

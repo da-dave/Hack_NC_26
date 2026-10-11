@@ -12,6 +12,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from pantrypulse_time import parse_day, parse_time_window
 
 TZ = ZoneInfo("America/New_York")
 SCHEMAS = {
@@ -157,19 +158,44 @@ class PantryPulse:
                 return
             draft["zip"] = text
             p["step"] = "pantry_hours"
-            self.notify(p["handle"], "When can you receive donations? Reply DAILY 09:00-17:00, MON-FRI 09:00-17:00, or SAT-SUN 09:00-17:00 (24-hour time).")
+            self.notify(p["handle"], "When can you receive donations? Reply 9am-5pm (every day for this demo).")
         elif step == "pantry_hours":
-            if not HOURS_RE.fullmatch(text.upper()):
-                self.notify(p["handle"], "Please use one of: DAILY, MON-FRI, SAT-SUN followed by 09:00-17:00.")
-                return
-            draft["hours"] = text.upper()
+            if HOURS_RE.fullmatch(text.upper()):
+                draft["hours"] = text.upper()
+            else:
+                try:
+                    a, b = parse_time_window(datetime.now(TZ).date(), text)
+                    if a.date() != b.date():
+                        raise ValueError("Overnight hours not supported")
+                    draft["hours"] = f"DAILY {a:%H:%M}-{b:%H:%M}"
+                except ValueError:
+                    self.notify(p["handle"], "Please reply 9am-5pm, or DAILY 09:00-17:00.")
+                    return
             self.finish_pantry(p, draft)
         p["draft"] = json.dumps(draft)
 
     def begin_donation(self, p):
         p["step"] = "donation_item"
         p["draft"] = "{}"
-        self.notify(p["handle"], "What unopened, shelf-stable food item would you like to donate? (e.g. Canned beans)")
+        self.notify(p["handle"], "What food are you donating? (Example: canned beans)")
+
+    def _finish_donation_time(self, p, draft, a, b):
+        """Return done, next (ask packaging), or invalid."""
+        if a >= b or b <= datetime.now(TZ) + timedelta(minutes=self.buffer_minutes):
+            self.notify(p["handle"], "That time has passed or is too soon. Choose a later time.")
+            return "invalid"
+        draft["start"], draft["end"] = stamp(a), stamp(b)
+        if draft.get("packaging") == "unopened":
+            if draft.get("items"):
+                for item in draft["items"]:
+                    self.create_donation(p["handle"], {**draft, **item})
+            else:
+                self.create_donation(p["handle"], draft)
+            p["step"], p["draft"] = "", "{}"
+            return "done"
+        p["step"] = "donation_packaging"
+        self.notify(p["handle"], "Are the items unopened and shelf-stable? Reply YES or NO.")
+        return "next"
 
     def donation_intake(self, p, text):
         draft = json.loads(p["draft"] or "{}")
@@ -184,48 +210,63 @@ class PantryPulse:
             units = self.seed_inventory[self.seed_inventory["food_item"].str.lower() == item.lower()]["unit"]
             draft["unit"] = units.iloc[0]
             p["step"] = "donation_quantity"
-            self.notify(p["handle"], f"How many {draft['unit']} are you donating? Enter a whole number.")
+            self.notify(p["handle"], f"How many {draft['unit']}?")
         elif step == "donation_quantity":
             if not text.isdigit() or int(text) < 1:
                 self.notify(p["handle"], "Please enter a positive whole number (e.g. 24).")
                 return
             draft["quantity"] = int(text)
             p["step"] = "donation_zip"
-            self.notify(p["handle"], "What's your five-digit ZIP code? We'll use it as your donation location.")
+            self.notify(p["handle"], "What is your ZIP code? (5 digits)")
         elif step == "donation_zip":
             if not re.fullmatch(r"\d{5}", text):
-                self.notify(p["handle"], "Enter a valid five-digit ZIP code.")
+                self.notify(p["handle"], "Please enter a five-digit ZIP code (e.g. 27514).")
                 return
             draft["zip"] = text
-            p["step"] = "donation_time"
-            self.notify(p["handle"], "What date and time can you drop off? Reply like 2026-10-11 13:00-17:00 (Eastern time).")
+            if draft.get("start") and draft.get("end"):
+                result = self._finish_donation_time(
+                    p, draft, parse_dt(draft["start"]), parse_dt(draft["end"])
+                )
+                if result != "next":
+                    return
+            else:
+                p["step"] = "donation_day"
+                self.notify(p["handle"], "Which day can you drop off? Reply TODAY or TOMORROW.")
+        elif step == "donation_day":
+            # Keep old single-message 24-hour format for existing tests/testers.
+            legacy = DATE_RE.fullmatch(text)
+            if legacy:
+                try:
+                    day = parse_day(legacy.group(1))
+                    a, b = parse_time_window(day, f"{legacy.group(2)}-{legacy.group(3)}")
+                except ValueError:
+                    self.notify(p["handle"], "Please reply TODAY, TOMORROW, or a date like 10/12.")
+                    return
+                if self._finish_donation_time(p, draft, a, b) != "next":
+                    return
+            else:
+                try:
+                    day = parse_day(text)
+                except ValueError:
+                    self.notify(p["handle"], "Which day? Reply TODAY or TOMORROW (or 10/12).")
+                    return
+                draft["day"] = day.isoformat()
+                p["step"] = "donation_time"
+                self.notify(p["handle"], "What time? Reply 1-4pm, or just 2pm (one-hour window).")
         elif step == "donation_time":
-            m = DATE_RE.fullmatch(text)
-            if not m:
-                self.notify(p["handle"], "Enter YYYY-MM-DD HH:MM-HH:MM using 24-hour Eastern time.")
+            if not draft.get("day"):
+                # Recover an unfinished intake saved before this update.
+                p["step"] = "donation_day"
+                self.notify(p["handle"], "Which day? Reply TODAY or TOMORROW.")
+                p["draft"] = json.dumps(draft)
                 return
             try:
-                a = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}").replace(tzinfo=TZ)
-                b = datetime.fromisoformat(f"{m.group(1)}T{m.group(3)}").replace(tzinfo=TZ)
+                a, b = parse_time_window(parse_day(draft["day"]), text)
             except ValueError:
-                self.notify(p["handle"], "Invalid calendar date. Try again.")
+                self.notify(p["handle"], "Reply with a time like 1-4pm or 2pm (include am/pm).")
                 return
-            if a >= b or b <= datetime.now(TZ) + timedelta(minutes=self.buffer_minutes):
-                self.notify(p["handle"], "Please provide a future same-day window with at least 20 minutes before closing.")
+            if self._finish_donation_time(p, draft, a, b) != "next":
                 return
-            draft["start"] = stamp(a)
-            draft["end"] = stamp(b)
-            if draft.get("packaging") == "unopened":
-                p["step"] = ""
-                p["draft"] = "{}"
-                if draft.get("items"):
-                    for item in draft["items"]:
-                        self.create_donation(p["handle"], {**draft, **item})
-                else:
-                    self.create_donation(p["handle"], draft)
-                return
-            p["step"] = "donation_packaging"
-            self.notify(p["handle"], "Are all items unopened and shelf-stable? Reply YES or NO.")
         elif step == "donation_packaging":
             if text.upper() not in ("YES", "NO"):
                 self.notify(p["handle"], "Please reply YES or NO.")
@@ -294,8 +335,8 @@ class PantryPulse:
                 p["step"] = "donation_zip"
                 question = "What's your five-digit ZIP code?"
             elif not draft.get("start"):
-                p["step"] = "donation_time"
-                question = "When can you drop off? Reply YYYY-MM-DD HH:MM-HH:MM (Eastern)."
+                p["step"] = "donation_day"
+                question = "Which day can you drop off? Reply TODAY or TOMORROW."
             elif not draft.get("packaging"):
                 p["step"] = "donation_packaging"
                 question = "Are all items unopened and shelf-stable? Reply YES or NO."
@@ -512,7 +553,8 @@ class PantryPulse:
                 self.notify(handle, "Your pantry account already includes donor privileges. Text DONATE when ready.")
             else:
                 p.update(role="donor", step="", draft="{}")
-                self.notify(handle, "Registered as donor. Text DONATE to offer unopened shelf-stable food.")
+                self.notify(handle, "Welcome to PantryPulse!")
+                self.begin_donation(p)
         elif upper == "CANCEL REGISTRATION":
             p.update(step="", draft="{}")
             self.notify(handle, "Registration or intake cancelled. Your account remains unchanged.")

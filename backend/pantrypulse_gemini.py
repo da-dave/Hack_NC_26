@@ -31,13 +31,11 @@ def should_interpret(app, handle: str, text: str) -> bool:
     p = app.lookup("participants", handle=handle)
     if not p or p.get("role") not in ("donor", "pantry"):
         return False
-    if p.get("step") not in ("", "donation_item"):
+    if p.get("step"):
         return False
     msg = text.strip()
     if not msg or _COMMAND.fullmatch(msg):
         return False
-    if p.get("step") == "donation_item":
-        return True
     # Don't spend model calls on ordinary conversation or stray YES/NO replies.
     return bool(re.search(r"\d", msg) and re.search(
         r"\b(?:donat\w*|have|offer\w*|give|got|beans?|cans?|rice|pasta|"

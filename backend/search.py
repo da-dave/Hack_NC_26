@@ -21,28 +21,21 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL") or "gemini-3.8-flash"
 
 
-# ----------------------------
-# Gemini output structure
-# ----------------------------
-
 class DonationItem(BaseModel):
+    """Structured representation of one donated food item."""
+
     food_item: str = Field(
         description="The donated food item, normalized to match inventory names."
     )
-    quantity: float = Field(
-        description="The amount of food being donated."
-    )
+    quantity: float = Field(description="The amount of food being donated.")
     unit: Optional[str] = Field(
         default=None,
         description="Unit such as cans, pounds, boxes, bags, jars, etc."
     )
 
 
-# ----------------------------
-# Gemini parsing
-# ----------------------------
-
 def gemini_parse(message: str) -> DonationItem:
+    """Parse one donor message into one structured donation item."""
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY is not set.")
 
@@ -72,6 +65,12 @@ food_item = "Potatoes"
 quantity = 15
 unit = "lb"
 
+"8 boxes of cereal"
+food_item = "Cereal"
+quantity = 8
+unit = "boxes"
+
+Correct obvious spelling mistakes.
 Do not invent information.
 
 Message:
@@ -88,91 +87,173 @@ Message:
         ),
     )
 
+    if not response.text:
+        raise RuntimeError("Gemini returned an empty response.")
+
     return DonationItem.model_validate_json(response.text)
 
 
-# Algo. to find the 
+def find_best_pantries(food_item: str) -> list[dict]:
+    """
+    Return up to 3 pantry options.
 
-def find_best_pantry(food_item: str):
+    If pantries need the item:
+    - option 1 = largest shortage
+    - options 2 and 3 = next-largest shortages
+
+    If nobody needs the item:
+    - return up to 3 random pantries
+    """
     pantries = pd.read_csv(PANTRIES_CSV)
     inventory = pd.read_csv(INVENTORY_CSV)
 
-    # Find pantries that track this food item
     matches = inventory[
-        inventory["food_item"].str.lower() == food_item.lower()
+        inventory["food_item"].astype(str).str.strip().str.lower()
+        == food_item.strip().lower()
     ].copy()
 
-    if matches.empty:
-        return None
+    if not matches.empty:
+        matches["need"] = (
+            matches["target_quantity"] - matches["quantity_on_hand"]
+        )
 
-    # Need = desired inventory - current inventory
-    matches["need"] = (
-        matches["target_quantity"] - matches["quantity_on_hand"]
-    )
+        matches = matches[matches["need"] > 0].copy()
 
-    # Only keep pantries that actually need more
-    matches = matches[matches["need"] > 0]
+    if not matches.empty:
+        matches = matches.sort_values(by="need", ascending=False).head(3)
 
-    if matches.empty:
-        return None
+        results = []
 
-    # Pantry with the largest shortage
-    best_match = matches.loc[matches["need"].idxmax()]
+        for _, match in matches.iterrows():
+            pantry_rows = pantries[
+                pantries["pantry_id"] == match["pantry_id"]
+            ]
 
-    # Retrieve pantry contact info
-    pantry = pantries[
-        pantries["pantry_id"] == best_match["pantry_id"]
-    ].iloc[0]
+            if pantry_rows.empty:
+                continue
 
-    return {
-        "pantry_id": int(pantry["pantry_id"]),
-        "pantry_name": pantry["pantry_name"],
-        "address": pantry["address"],
-        "phone": pantry["contact_phone"],
-        "food_item": best_match["food_item"],
-        "need": float(best_match["need"]),
-        "unit": best_match["unit"],
-    }
+            pantry = pantry_rows.iloc[0]
 
+            results.append(
+                {
+                    "pantry_id": int(pantry["pantry_id"]),
+                    "pantry_name": pantry["pantry_name"],
+                    "address": pantry["address"],
+                    "phone": pantry["contact_phone"],
+                    "food_item": match["food_item"],
+                    "need": float(match["need"]),
+                    "unit": match["unit"],
+                    "reason": "needed",
+                }
+            )
 
-# Main search function
+        return results
 
-def search(message: str):
-    donation = gemini_parse(message)
+    if pantries.empty:
+        return []
 
-    pantry = find_best_pantry(donation.food_item)
+    random_pantries = pantries.sample(n=min(3, len(pantries)))
 
-    if pantry is None:
-        return {
-            "match": None,
-            "message": (
-                f"No pantry currently needs {donation.food_item}."
-            ),
+    return [
+        {
+            "pantry_id": int(pantry["pantry_id"]),
+            "pantry_name": pantry["pantry_name"],
+            "address": pantry["address"],
+            "phone": pantry["contact_phone"],
+            "food_item": food_item,
+            "need": None,
+            "unit": None,
+            "reason": "random_fallback",
         }
+        for _, pantry in random_pantries.iterrows()
+    ]
+
+
+def pretty_number(value: float | None) -> str:
+    """Display whole numbers without a trailing .0."""
+    if value is None:
+        return ""
+
+    value = float(value)
+    return str(int(value)) if value.is_integer() else str(value)
+
+
+def format_message(donation: DonationItem, pantries: list[dict]) -> str:
+    """Create the donor-facing Photon message."""
+    if not pantries:
+        return "No pantries are currently available."
+
+    if pantries[0]["reason"] == "needed":
+        best = pantries[0]
+
+        lines = [
+            "Best option:",
+            best["pantry_name"],
+            f"Address: {best['address']}",
+            f"Phone: {best['phone']}",
+            f"Current need: {pretty_number(best['need'])} {best['unit']}",
+        ]
+
+        if len(pantries) > 1:
+            lines += ["", "Backup options:"]
+
+            for index, pantry in enumerate(pantries[1:], start=1):
+                lines += [
+                    "",
+                    f"Backup {index}:",
+                    pantry["pantry_name"],
+                    f"Address: {pantry['address']}",
+                    f"Phone: {pantry['phone']}",
+                    f"Current need: {pretty_number(pantry['need'])} {pantry['unit']}",
+                ]
+
+        lines += [
+            "",
+            "Reply PROCEED if you'd like me to contact the best option.",
+        ]
+
+        return "\n".join(lines)
+
+    lines = [
+        f"No pantry currently lists a need for {donation.food_item}.",
+        "",
+        "Here are 3 pantries you could try contacting:",
+    ]
+
+    for index, pantry in enumerate(pantries, start=1):
+        lines += [
+            "",
+            f"Option {index}:",
+            pantry["pantry_name"],
+            f"Address: {pantry['address']}",
+            f"Phone: {pantry['phone']}",
+        ]
+
+    lines += [
+        "",
+        "Reply PROCEED if you'd like me to contact the first option.",
+    ]
+
+    return "\n".join(lines)
+
+
+def search(message: str) -> dict:
+    """Main entry point for the Photon webhook."""
+    donation = gemini_parse(message)
+    pantries = find_best_pantries(donation.food_item)
 
     return {
         "donation": donation.model_dump(),
-        "match": pantry,
-        "message": (
-            f"Best match: {pantry['pantry_name']}\n"
-            f"Address: {pantry['address']}\n"
-            f"Phone: {pantry['phone']}\n"
-            f"They currently need {pantry['need']} {pantry['unit']} "
-            f"of {pantry['food_item']}."
-        ),
+        "matches": pantries,
+        "message": format_message(donation, pantries),
     }
 
 
-# ----------------------------
-# Local testing
-# ----------------------------
-
 if __name__ == "__main__":
     donor_message = input("Donor message: ").strip()
-
     result = search(donor_message)
 
-    print("\n--- Result ---")
+    print("\n--- Photon reply ---")
     print(result["message"])
 
     print("\n--- Full data ---")
