@@ -1,46 +1,24 @@
-"""Offline adapter tests: no API keys, network calls or real iMessages."""
+"""Intake recognition must never confuse donor metadata with food quantities."""
 import sys
-import tempfile
-import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
-from types import SimpleNamespace
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
+from pantrypulse_gemini import offer_fields
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
-from pantrypulse_engine import PantryPulse
-from pantrypulse_gemini import parse_donation, should_interpret
+class IntakeTests(unittest.TestCase):
+    def test_explicit_fields(self):
+        fields = offer_fields('DONATE 24 unopened cans of beans; address: 201 Sample Rd NC 27514; 2026-10-14 12:00-16:00')
+        self.assertEqual(fields['quantity'], 24)
+        self.assertEqual(fields['address'], '201 Sample Rd NC 27514')
+        self.assertEqual(fields['zip'], '27514')
+        self.assertEqual(fields['start'], '2026-10-14T12:00')
+        self.assertEqual(fields['packaging'], 'unopened')
 
+    def test_address_and_zip_are_not_food_quantity(self):
+        fields = offer_fields('I have beans at 201 Sample Rd, NC 27514')
+        self.assertNotIn('quantity', fields)
 
-class GeminiAdapterTests(unittest.TestCase):
-    def test_uses_search_results_and_preserves_recommendations(self):
-        matches = [{"pantry_id": 2, "pantry_name": "Demo", "reason": "needed"}]
-        with patch('search.search', return_value={
-            "donation": {"food_item": "Canned beans", "quantity": 24, "unit": "cans"},
-            "matches": matches, "message": "Options",
-        }) as search:
-            message = 'I have 24 unopened cans of beans in 27514 for 2026-10-14 12:00-16:00'
-            parsed = parse_donation(message)
-        search.assert_called_once_with(message)
-        self.assertEqual(parsed.items[0]["recommendations"], matches)
-        self.assertEqual(parsed.zip_code, '27514')
-        self.assertEqual(parsed.window, '2026-10-14 12:00-16:00')
-        self.assertTrue(parsed.packaging_verified)
+    def test_negated_sealed_claim_needs_confirmation(self):
+        self.assertNotIn('packaging', offer_fields('24 cans of beans, not sealed'))
 
-    def test_detects_only_donation_intake(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path=Path(tmp)
-            pd.DataFrame([{'pantry_id':1,'pantry_name':'Demo','address':'Fictional','contact_phone':'555'}]).to_csv(path/'pantries.csv', index=False)
-            pd.DataFrame([{'pantry_id':1,'food_item':'Canned beans','quantity_on_hand':0,'target_quantity':100,'unit':'cans'}]).to_csv(path/'inventory.csv', index=False)
-            app=PantryPulse(path)
-            app.on_message(handle='donor',space_id='s',message_id='1',text='JOIN DONOR')
-            # Finish/reset guided registration before testing an unsolicited donation.
-            app.lookup('participants', handle='donor')['step'] = ''
-            self.assertTrue(should_interpret(app,'donor','I have 24 cans of beans'))
-            self.assertFalse(should_interpret(app,'donor','STATUS'))
-            self.assertFalse(should_interpret(app,'donor','Hi'))
-            self.assertFalse(should_interpret(app,'donor','ACCEPT 104'))
-            self.assertFalse(should_interpret(app,'stranger','I have 24 cans of beans'))
-
-if __name__=='__main__':unittest.main()
+if __name__ == '__main__': unittest.main()

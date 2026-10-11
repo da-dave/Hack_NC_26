@@ -61,15 +61,13 @@ Matching considers:
 
 - Requested food categories
 - Quantity and capacity
-- Distance
-- Donation acceptance policies
 - Pickup or drop-off availability
 
 Deterministic matching rules rank eligible pantries. AI helps interpret the input but does not independently decide whether food is safe or acceptable.
 
 ### 4. Photon coordinates the offer
 
-Foodbridge uses **Photon Spectrum** to send an offer to an opted-in pantry through iMessage.
+Foodbridge first sends the donor the best pantry and up to two backups. Once the donor replies `PROCEED` or `PROCEED <option>`, **Photon Spectrum** sends the offer to the selected opted-in pantry through iMessage.
 
 **Example:**
 
@@ -79,33 +77,33 @@ Foodbridge uses **Photon Spectrum** to send an offer to an opted-in pantry throu
 
 If the pantry declines or doesn't respond before the deadline, Foodbridge can offer the donation to the next eligible pantry.
 
-### 5. Donation is reserved
+### 5. Acceptance completes the offer
 
-When a pantry accepts, the backend reserves the donation for that pantry, preventing it from being assigned twice.
+When a pantry replies `ACCEPT <id>`, the offer is completed and the donor gets
+handoff details. `PASS <id>` or a timeout automatically contacts the next saved
+backup from search. No new ranking is performed during fallback.
 
-Photon notifies the donor and provides the agreed handoff details.
-
-### 6. Donation is completed
-
-After the pantry confirms receipt, Foodbridge marks the donation as completed and updates its records.
+`RECEIVED <id>` is an optional delivery confirmation; acceptance already completes
+the coordination workflow. Accepted offers reduce projected shortages, while
+physical stock on hand remains the inventory CSV's recorded value.
 
 ## System Architecture
 
-| Component     | Technology            | Responsibility                                                  |
-| ------------- | --------------------- | --------------------------------------------------------------- |
-| Messaging     | Photon Spectrum       | Two-way communication with donors and pantries                  |
-| AI processing | Google Gemini         | Extract structured donation information from natural language   |
-| Backend       | TypeScript / Node.js  | Matching logic, offer sequencing, and donation state management |
-| Database      | Supabase / PostgreSQL | Store pantry needs, donations, offers, and statuses             |
-| Dashboard     | Next.js / React       | View donations, pantry needs, and matching activity             |
+| Component | Implementation | Responsibility |
+| --- | --- | --- |
+| Messaging | Photon Spectrum / TypeScript | Forward incoming messages; deliver queued backend replies |
+| Intake and state | Python JSON bridge / PantryPulse engine | Collect missing fields, save choices, sequence offers |
+| Search | Python / Gemini / pandas | Parse the complete offer and rank pantry inventory needs |
+| Storage | CSV files in `backend/data` | Pantry and donor profiles, inventory, donations, offers, inbox/outbox |
 
-### Donation Lifecycle
+There is no Supabase connection or dashboard implementation in this repository.
+The pantry data has no coordinates, so ranking uses remaining inventory need,
+registered messaging conversations, and receiving hours; it does not calculate distance.
 
-**Submitted → Validated → Matched → Offered → Accepted → Reserved → Delivered → Completed**
+**Collecting details → Search → Awaiting donor choice → Offered → Completed on acceptance**
 
-An offer can also be declined or expire, allowing the system to try another eligible pantry.
-
-If no suitable pantry accepts, the donor is notified.
+A rejection or timeout advances through the saved suggestions. Exhausting the
+suggestions marks the offer unmatched and notifies the donor.
 
 ## Core MVP Features
 
@@ -116,8 +114,8 @@ Our HackNC prototype focuses on one complete, functional donation workflow:
 3. **Needs-based pantry matching** — The backend ranks eligible pantries using stored needs and matching rules.
 4. **Two-way messaging with Photon** — Pantries receive offers and respond with simple commands.
 5. **Automatic offer progression** — Declined or expired offers can be routed to another pantry.
-6. **Donation status tracking** — The system tracks offers, reservations, and completed donations.
-7. **Basic dashboard** — Demonstrates matching decisions and donation progress.
+6. **Donation status tracking** — The system tracks donor choices, pending offers, acceptance and optional receipt.
+7. **Persistent conversations** — Intake details, choices and pending offers survive backend restarts.
 
 For the hackathon, pantry profiles and inventory needs may use clearly labeled sample data. Real-world deployment would require participating pantries to maintain or verify their needs.
 
@@ -141,13 +139,13 @@ The central innovation is combining structured matching with a familiar, two-way
 Our demonstration follows a single donation from start to finish:
 
 1. A donor offers 24 cans of beans through a message.
-2. Gemini extracts the item, quantity, location, and availability.
-3. Foodbridge identifies multiple eligible pantries.
-4. The first pantry receives a Photon message and replies `PASS 104`.
-5. The system contacts the next pantry.
-6. The second pantry replies `ACCEPT 104`.
-7. Foodbridge reserves the donation and confirms the handoff with the donor.
-8. The pantry confirms receipt, completing the donation.
+2. Photon collects missing quantity, donor address, ZIP, drop-off window and packaging details.
+3. Gemini parses the complete offer and search ranks the participating pantries.
+4. The donor replies `PROCEED` to choose the best option.
+5. The first pantry receives an offer and replies `PASS 104`.
+6. The system contacts the next saved backup.
+7. That pantry replies `ACCEPT 104`, completing the offer and notifying the donor.
+8. The pantry may optionally confirm physical receipt.
 
 This demonstrates not only finding a potential match, but also coordinating acceptance and tracking the result.
 
@@ -180,25 +178,61 @@ Foodbridge brings donors and food pantries together by turning a simple message 
 
 ### Run the Photon donor-choice flow
 
-Start the backend with `.venv/bin/python backend/pantrypulse_service.py`, then
-run `npx tsx src/index.ts` from `photon-test` (with the Spectrum dependencies
-installed). `src/pantrypulse.ts` uses the same flow. Configure `GEMINI_API_KEY`
-and the Spectrum project credentials in your environment or `.env`.
+From the repository root, start the Python bridge:
 
-A donor texts `JOIN DONOR`, then a message such as `24 unopened cans of beans`.
-The bridge sends the description to `backend/search.py`, which parses the item
-and recommends up to three pantries. The backend collects missing ZIP,
-drop-off day/time, and packaging confirmation, then sends the numbered pantry
-options. Guided `DONATE` intake uses the same pantry recommendation logic.
+```sh
+.venv/bin/python backend/pantrypulse_service.py
+```
 
-Reply `PROCEED 2` to choose option 2, or `PROCEED 104 2` to choose option 2 for
-donation 104 when several donations are pending. `PROCEED` alone selects option
-1 when exactly one donation is awaiting a choice. No pantry receives an offer
-until the donor chooses. Choices are saved across backend restarts.
+With `spectrum-ts`, `dotenv` and `tsx` installed in your Node environment, start
+Photon from the repository root so it reads the same root `.env`:
 
-The selected pantry must be registered in the Photon demo, open during the
-handoff window, and have enough remaining need for the donation. Otherwise the
-donor can choose another option or cancel. The existing pantry commands
-`ACCEPT <id>`, `PASS <id>`, and `RECEIVED <id>` continue to work; a pass or offer
-expiry still advances to the next eligible pantry as before. Search currently
-parses one food item per message.
+```sh
+npx tsx photon-test/src/index.ts
+```
+
+`photon-test/src/pantrypulse.ts` is the same agent. `echo-backup.ts` is only an
+old echo demo. This repository currently does not include a Node package manifest.
+Configure `GEMINI_API_KEY`, optional `GEMINI_MODEL`, `SPECTRUM_PROJECT_ID` and
+`SPECTRUM_PROJECT_SECRET` in `.env` or the environment.
+
+A pantry uses `JOIN PANTRY <ID>` to link its messaging conversation to a profile
+in `pantries.csv`, then supplies missing ZIP and receiving hours. `JOIN PANTRY`
+alone can match the sender's phone number against `contact_phone`. All seeded
+profiles are supported; only registered pantries open during the donation window
+are suggested, so Photon has a conversation in which to deliver each offer.
+
+A donor texts `JOIN DONOR`, then describes one food donation. Photon collects
+missing quantity/unit, address, ZIP, drop-off day/time and unopened shelf-stable
+confirmation before sending the entire assembled offer to `search.py`. Known
+donor name/address are loaded from `donors.csv` by phone number; new or corrected
+details persist in `pp_participants.csv` and each donation record.
+
+Search returns the best pantry and up to two ordered backups. Reply `PROCEED`
+for option 1, `PROCEED 2` for option 2, or `PROCEED 104 2` when several donations
+are awaiting a choice. No pantry gets an offer until the donor proceeds. A
+rejection or timeout follows the remaining saved suggestions in order; it does
+not contact a fourth pantry. `ACCEPT <id>` completes the offer. A pantry can
+accept more than its listed shortage, including a no-shortage fallback; its
+acceptance is the final decision.
+
+### Storage and pledges
+
+| File | Use |
+| --- | --- |
+| `pantries.csv` | Pantry IDs, names, addresses and contact phones |
+| `inventory.csv` | Recorded stock, target quantities and food units |
+| `donors.csv` | Existing donor names, addresses and phone numbers |
+| `pp_participants.csv` | Live donor/pantry identities, conversations and unfinished intake |
+| `pp_donations.csv` | Offers, donor addresses, saved suggestions, chosen pantry and completion status |
+| `pp_offers.csv` | Each pantry attempt, acceptance/rejection and timeout |
+| `pp_inbox.csv`, `pp_outbox.csv` | Message deduplication and queued replies |
+| `pledges.csv` | Legacy sample data; unused by the active workflow |
+
+`pledges.csv` is unnecessary for this workflow: donations and offer attempts
+already store those commitments. It is preserved as historical sample data but
+is not subtracted from inventory needs. Both search and the engine subtract
+accepted/completed offers once when computing projected shortage. Acceptance
+does not claim the food was physically delivered or change stock on hand.
+
+Run offline workflow tests with `.venv/bin/python -m unittest discover -s tests`.
