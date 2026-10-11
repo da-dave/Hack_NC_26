@@ -1,0 +1,101 @@
+inventory_id,pantry_id,food_item,quantity_on_hand,target_quantity,unit,last_updated
+1,1,Canned beans,173,228,cans,2026-10-10
+2,1,Rice,16,389,bags,2026-10-10
+3,1,Pasta,80,262,boxes,2026-10-10
+4,1,Peanut butter,67,235,jars,2026-10-10
+5,1,Canned vegetables,198,226,cans,2026-10-10
+6,1,Canned fruit,183,389,cans,2026-10-10
+7,1,Oatmeal,149,222,containers,2026-10-10
+8,1,Canned tuna,161,308,cans,2026-10-10
+9,1,Shelf-stable milk,18,207,cartons,2026-10-10
+10,1,Cereal,33,255,boxes,2026-10-10
+11,2,Canned beans,69,329,cans,2026-10-10
+12,2,Rice,164,206,bags,2026-10-10
+13,2,Pasta,153,250,boxes,2026-10-10
+14,2,Peanut butter,193,366,jars,2026-10-10
+15,2,Canned vegetables,189,339,cans,2026-10-10
+16,2,Canned fruit,117,256,cans,2026-10-10
+17,2,Oatmeal,124,350,containers,2026-10-10
+18,2,Canned tuna,81,201,cans,2026-10-10
+19,2,Shelf-stable milk,50,378,cartons,2026-10-10
+20,2,Cereal,118,287,boxes,2026-10-10
+21,3,Canned beans,81,239,cans,2026-10-10
+22,3,Rice,65,395,bags,2026-10-10
+23,3,Pasta,96,226,boxes,2026-10-10
+24,3,Peanut butter,33,297,jars,2026-10-10
+25,3,Canned vegetables,34,291,cans,2026-10-10
+26,3,Canned fruit,98,354,cans,2026-10-10
+27,3,Oatmeal,77,211,containers,2026-10-10
+28,3,Canned tuna,196,317,cans,2026-10-10
+29,3,Shelf-stable milk,147,231,cartons,2026-10-10
+30,3,Cereal,106,220,boxes,2026-10-10
+31,4,Canned beans,151,275,cans,2026-10-10
+32,4,Rice,170,358,bags,2026-10-10
+33,4,Pasta,102,347,boxes,2026-10-10
+34,4,Peanut butter,59,380,jars,2026-10-10
+35,4,Canned vegetables,27,211,cans,2026-10-10
+36,4,Canned fruit,179,258,cans,2026-10-10
+37,4,Oatmeal,84,220,containers,2026-10-10
+38,4,Canned tuna,69,225,cans,2026-10-10
+39,4,Shelf-stable milk,107,271,cartons,2026-10-10
+40,4,Cereal,126,362,boxes,2026-10-10
+41,5,Canned beans,103,241,cans,2026-10-10
+42,5,Rice,104,290,bags,2026-10-10
+43,5,Pasta,63,371,boxes,2026-10-10
+44,5,Peanut butter,78,379,jars,2026-10-10
+45,5,Canned vegetables,184,365,cans,2026-10-10
+46,5,Canned fruit,28,355,cans,2026-10-10
+47,5,Oatmeal,172,243,containers,2026-10-10
+48,5,Canned tuna,146,386,cans,2026-10-10
+49,5,Shelf-stable milk,72,241,cartons,2026-10-10
+50,5,Cereal,128,297,boxes,2026-10-10
+51,6,Canned beans,79,363,cans,2026-10-10
+52,6,Rice,186,342,bags,2026-10-10
+53,6,Pasta,66,375,boxes,2026-10-10
+54,6,Peanut butter,93,396,jars,2026-10-10
+55,6,Canned vegetables,24,258,cans,2026-10-10
+56,6,Canned fruit,18,280,cans,2026-10-10
+57,6,Oatmeal,112,268,containers,2026-10-10
+58,6,Canned tuna,26,254,cans,2026-10-10
+59,6,Shelf-stable milk,155,383,cartons,2026-10-10
+60,6,Cereal,90,254,boxes,2026-10-10
+61,7,Canned beans,177,327,cans,2026-10-10
+62,7,Rice,111,364,bags,2026-10-10
+63,7,Pasta,127,236,boxes,2026-10-10
+64,7,Peanut butter,77,235,jars,2026-10-10
+65,7,Canned vegetables,73,390,cans,2026-10-10
+66,7,Canned fruit,153,337,cans,2026-10-10
+67,7,Oatmeal,77,391,containers,2026-10-10
+68,7,Canned tuna,159,309,cans,2026-10-10
+69,7,Shelf-stable milk,159,302,cartons,2026-10-10
+70,7,Cereal,102,256,boxes,2026-10-10
+71,8,Canned beans,45,330,cans,2026-10-10
+72,8,Rice,136,223,bags,2026-10-10
+73,8,Pasta,22,228,boxes,2026-10-10
+74,8,Peanut butter,49,360,jars,2026-10-10
+75,8,Canned vegetables,50,374,cans,2026-10-10
+76,8,Canned fruit,118,352,cans,2026-10-10
+77,8,Oatmeal,26,298,containers,2026-10-10
+78,8,Canned tuna,107,352,cans,2026-10-10
+79,8,Shelf-stable milk,129,335,cartons,2026-10-10
+80,8,Cereal,74,341,boxes,2026-10-10
+81,9,Canned beans,12,374,cans,2026-10-10
+82,9,Rice,194,229,bags,2026-10-10
+83,9,Pasta,184,337,boxes,2026-10-10
+84,9,Peanut butter,78,396,jars,2026-10-10
+85,9,Canned vegetables,174,287,cans,2026-10-10
+86,9,Canned fruit,38,275,cans,2026-10-10
+87,9,Oatmeal,121,240,containers,2026-10-10
+88,9,Canned tuna,126,200,cans,2026-10-10
+89,9,Shelf-stable milk,194,384,cartons,2026-10-10
+90,9,Cereal,77,328,boxes,2026-10-10
+91,10,Canned beans,55,329,cans,2026-10-10
+92,10,Rice,37,360,bags,2026-10-10
+93,10,Pasta,86,363,boxes,2026-10-10
+94,10,Peanut butter,139,355,jars,2026-10-10
+95,10,Canned vegetables,60,239,cans,2026-10-10
+96,10,Canned fruit,105,395,cans,2026-10-10
+97,10,Oatmeal,51,338,containers,2026-10-10
+98,10,Canned tuna,145,200,cans,2026-10-10
+99,10,Shelf-stable milk,163,282,cartons,2026-10-10
+100,10,Cereal,135,204,boxes,2026-10-10
