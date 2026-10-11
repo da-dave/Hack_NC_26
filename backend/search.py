@@ -91,7 +91,7 @@ Message:
     return DonationItem.model_validate_json(response.text)
 
 
-# Algo. to find the 
+# Algo. to find the best pantry
 
 def find_best_pantry(food_item: str):
     pantries = pd.read_csv(PANTRIES_CSV)
