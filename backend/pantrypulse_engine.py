@@ -215,6 +215,15 @@ class PantryPulse:
                 return
             draft["start"] = stamp(a)
             draft["end"] = stamp(b)
+            if draft.get("packaging") == "unopened":
+                p["step"] = ""
+                p["draft"] = "{}"
+                if draft.get("items"):
+                    for item in draft["items"]:
+                        self.create_donation(p["handle"], {**draft, **item})
+                else:
+                    self.create_donation(p["handle"], draft)
+                return
             p["step"] = "donation_packaging"
             self.notify(p["handle"], "Are all items unopened and shelf-stable? Reply YES or NO.")
         elif step == "donation_packaging":
@@ -226,9 +235,81 @@ class PantryPulse:
             if text.upper() == "NO":
                 self.notify(p["handle"], "This MVP accepts only unopened shelf-stable donations. No donation was created.")
                 return
-            self.create_donation(p["handle"], draft)
+            # Gemini can extract multiple independently matched items.
+            # The scripted intake still supports one-item donations.
+            draft["packaging"] = "unopened"
+            if draft.get("items"):
+                for item in draft["items"]:
+                    self.create_donation(p["handle"], {**draft, **item})
+            else:
+                self.create_donation(p["handle"], draft)
             return
         p["draft"] = json.dumps(draft)
+
+    def on_parsed_intake(self, *, handle: str, space_id: str,
+                         message_id: str, items: list[dict],
+                         zip_code: str = "", window: str = "",
+                         packaging_verified: bool = False):
+        """Start guided intake from Gemini output; save state across messages.
+
+        Gemini extracts; this backend validates categories, quantities, units,
+        and later makes all matching decisions.
+        """
+        key = f"{space_id}|{message_id}"
+        if self.lookup("inbox", message_key=key):
+            return
+        p = self.part(handle, space_id)
+        if p["role"] not in ("donor", "pantry"):
+            self.notify(handle, "Please JOIN DONOR or JOIN PANTRY first.")
+        else:
+            accepted = []
+            names = {str(x).lower(): str(x) for x in self.seed_inventory["food_item"].tolist()}
+            for item in items:
+                name = canonical(str(item.get("item", "")))
+                if name.lower() not in names:
+                    raise ValueError(f"Unsupported food category: {name}. Reply DONATE to use guided entry.")
+                value = float(item.get("quantity") or 0)
+                if not value.is_integer() or value <= 0:
+                    raise ValueError("Please provide a positive whole-number quantity.")
+                record = self.seed_inventory[self.seed_inventory["food_item"].str.lower() == name.lower()].iloc[0]
+                canonical_unit = str(record["unit"])
+                given_unit = str(item.get("unit") or "").strip()
+                if given_unit and given_unit.casefold() != canonical_unit.casefold():
+                    raise ValueError(f"For {name}, please use quantities in {canonical_unit}.")
+                accepted.append({"item": names[name.lower()], "quantity": int(value), "unit": canonical_unit})
+            if not accepted:
+                raise ValueError("No recognizable donated items. Reply DONATE to use guided entry.")
+            draft = {"items": accepted}
+            if packaging_verified:
+                draft["packaging"] = "unopened"
+            if zip_code and re.fullmatch(r"\d{5}", zip_code):
+                draft["zip"] = zip_code
+            if window and DATE_RE.fullmatch(window):
+                m = DATE_RE.fullmatch(window)
+                a = datetime.fromisoformat(f"{m.group(1)}T{m.group(2)}").replace(tzinfo=TZ)
+                b = datetime.fromisoformat(f"{m.group(1)}T{m.group(3)}").replace(tzinfo=TZ)
+                if a < b and b > datetime.now(TZ) + timedelta(minutes=self.buffer_minutes):
+                    draft.update(start=stamp(a), end=stamp(b))
+            if not draft.get("zip"):
+                p["step"] = "donation_zip"
+                question = "What's your five-digit ZIP code?"
+            elif not draft.get("start"):
+                p["step"] = "donation_time"
+                question = "When can you drop off? Reply YYYY-MM-DD HH:MM-HH:MM (Eastern)."
+            elif not draft.get("packaging"):
+                p["step"] = "donation_packaging"
+                question = "Are all items unopened and shelf-stable? Reply YES or NO."
+            else:
+                p["step"] = ""
+                question = ""
+                for item in accepted:
+                    self.create_donation(handle, {**draft, **item})
+            p["draft"] = json.dumps(draft) if question else "{}"
+            self.notify(handle, f"I understood: " + ", ".join(
+                f"{x['quantity']} {x['unit']} {x['item']}" for x in accepted
+            ) + (". " + question if question else ". Donation(s) recorded."))
+        self.tables["inbox"].append({"message_key": key})
+        self.save()
 
     def create_donation(self, donor: str, fields: dict):
         item = canonical(str(fields.get("item", "")))
