@@ -1,4 +1,4 @@
-# FoodBridge 🍎
+# PantryPulse
 ### Connecting surplus food with communities that need it.
 
 **HackNC 2026**
