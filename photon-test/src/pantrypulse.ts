@@ -42,7 +42,10 @@ async function api(
     }
     : undefined;
 
-  const response = await fetch(bridge + path, options);
+  const response = await fetch(bridge + path, {
+    ...options,
+    signal: AbortSignal.timeout(15000),
+  });
   const data = await response.json();
 
   if (!response.ok) {
@@ -67,12 +70,24 @@ async function main() {
     );
   }
 
+  console.log("Checking Python backend:", bridge);
+  await api("/health");
+  console.log("Python backend connected. Connecting to Photon Spectrum...");
+  const connectionWarning = setTimeout(() => {
+    console.warn("Still waiting for Spectrum initialization. Check the project's iMessage connection and credentials in Photon.");
+  }, 15000);
   // Initialize Spectrum.
-  const app = await Spectrum({
-    projectId,
-    projectSecret,
-    providers: [imessage.config()],
-  });
+  const app = await (async () => {
+    try {
+      return await Spectrum({
+        projectId,
+        projectSecret,
+        providers: [imessage.config()],
+      });
+    } finally {
+      clearTimeout(connectionWarning);
+    }
+  })();
 
   const im = imessage(app);
 
@@ -174,12 +189,18 @@ async function main() {
   console.log("-----------------------------------");
 
   // Send any messages already queued.
-  await flushOutbox();
+  void flushOutbox();
 
   /**
    * Process incoming iMessages.
    */
   for await (const [space, message] of app.messages) {
+    console.log("Spectrum event:", {
+      platform: message.platform,
+      direction: message.direction,
+      contentType: message.content?.type,
+      hasSender: Boolean(message.sender?.id),
+    });
     // Don't respond to messages sent by the agent.
     if (message.direction === "outbound") {
       continue;
@@ -187,16 +208,19 @@ async function main() {
 
     // Only handle iMessage.
     if (message.platform !== "imessage") {
+      console.warn("Skipping event from platform:", message.platform);
       continue;
     }
 
     // Only process incoming text.
     if (message.content.type !== "text") {
+      console.log("Skipping non-text event.");
       continue;
     }
 
     // Sender must have an identifier.
     if (!message.sender?.id) {
+      console.warn("Skipping event without a sender ID.");
       continue;
     }
 

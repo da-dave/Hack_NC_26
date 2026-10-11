@@ -1,0 +1,15 @@
+{
+  "name": "foodbridge-photon",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "DOTENV_CONFIG_PATH=../.env tsx src/index.ts"
+  },
+  "dependencies": {
+    "dotenv": "*",
+    "spectrum-ts": "*"
+  },
+  "devDependencies": {
+    "tsx": "*"
+  }
+}

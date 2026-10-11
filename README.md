@@ -184,15 +184,17 @@ From the repository root, start the Python bridge:
 .venv/bin/python backend/pantrypulse_service.py
 ```
 
-With `spectrum-ts`, `dotenv` and `tsx` installed in your Node environment, start
-Photon from the repository root so it reads the same root `.env`:
+In a second terminal, install and start the Photon agent:
 
 ```sh
-npx tsx photon-test/src/index.ts
+cd photon-test
+npm install
+npm start
 ```
 
+The start script loads the repository root `.env`.
 `photon-test/src/pantrypulse.ts` is the same agent. `echo-backup.ts` is only an
-old echo demo. This repository currently does not include a Node package manifest.
+old echo demo.
 Configure `GEMINI_API_KEY`, optional `GEMINI_MODEL`, `SPECTRUM_PROJECT_ID` and
 `SPECTRUM_PROJECT_SECRET` in `.env` or the environment.
 
