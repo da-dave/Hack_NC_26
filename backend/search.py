@@ -93,7 +93,7 @@ Message:
     return DonationItem.model_validate_json(response.text)
 
 
-def find_best_pantries(food_item: str) -> list[dict]:
+def find_best_pantries(food_item: str, data_dir: Path | None = None) -> list[dict]:
     """
     Return up to 3 pantry options.
 
@@ -104,8 +104,8 @@ def find_best_pantries(food_item: str) -> list[dict]:
     If nobody needs the item:
     - return up to 3 random pantries
     """
-    pantries = pd.read_csv(PANTRIES_CSV)
-    inventory = pd.read_csv(INVENTORY_CSV)
+    pantries = pd.read_csv(data_dir / "pantries.csv" if data_dir else PANTRIES_CSV)
+    inventory = pd.read_csv(data_dir / "inventory.csv" if data_dir else INVENTORY_CSV)
 
     matches = inventory[
         inventory["food_item"].astype(str).str.strip().str.lower()
@@ -131,6 +131,8 @@ def find_best_pantries(food_item: str) -> list[dict]:
 
             if pantry_rows.empty:
                 continue
+
+            print("LOGIC IS WORKING")
 
             pantry = pantry_rows.iloc[0]
 
@@ -183,64 +185,22 @@ def format_message(donation: DonationItem, pantries: list[dict]) -> str:
     if not pantries:
         return "No pantries are currently available."
 
-    if pantries[0]["reason"] == "needed":
-        best = pantries[0]
-
-        lines = [
-            "Best option:",
-            best["pantry_name"],
-            f"Address: {best['address']}",
-            f"Phone: {best['phone']}",
-            f"Current need: {pretty_number(best['need'])} {best['unit']}",
-        ]
-
-        if len(pantries) > 1:
-            lines += ["", "Backup options:"]
-
-            for index, pantry in enumerate(pantries[1:], start=1):
-                lines += [
-                    "",
-                    f"Backup {index}:",
-                    pantry["pantry_name"],
-                    f"Address: {pantry['address']}",
-                    f"Phone: {pantry['phone']}",
-                    f"Current need: {pretty_number(pantry['need'])} {pantry['unit']}",
-                ]
-
-        lines += [
-            "",
-            "Reply PROCEED if you'd like me to contact the best option.",
-        ]
-
-        return "\n".join(lines)
-
-    lines = [
-        f"No pantry currently lists a need for {donation.food_item}.",
-        "",
-        "Here are 3 pantries you could try contacting:",
-    ]
-
+    lines = [f"Donation: {pretty_number(donation.quantity)} {donation.unit or ''} {donation.food_item}"]
+    if pantries[0]["reason"] != "needed":
+        lines.append(f"No pantry currently lists a need for {donation.food_item}.")
     for index, pantry in enumerate(pantries, start=1):
-        lines += [
-            "",
-            f"Option {index}:",
-            pantry["pantry_name"],
-            f"Address: {pantry['address']}",
-            f"Phone: {pantry['phone']}",
-        ]
-
-    lines += [
-        "",
-        "Reply PROCEED if you'd like me to contact the first option.",
-    ]
-
+        lines += ["", f"Option {index}: {pantry['pantry_name']}",
+                  f"Address: {pantry['address']}", f"Phone: {pantry['phone']}"]
+        if pantry.get("need") is not None:
+            lines.append(f"Current need: {pretty_number(pantry['need'])} {pantry['unit']}")
+    lines += ["", "Reply PROCEED <option number> to choose a pantry (e.g. PROCEED 1)."]
     return "\n".join(lines)
 
 
-def search(message: str) -> dict:
+def search(message: str, data_dir: Path | None = None) -> dict:
     """Main entry point for the Photon webhook."""
     donation = gemini_parse(message)
-    pantries = find_best_pantries(donation.food_item)
+    pantries = find_best_pantries(donation.food_item, data_dir)
 
     return {
         "donation": donation.model_dump(),

@@ -176,3 +176,29 @@ Potential extensions include:
 **A community where usable food reaches the people who need it, with less guesswork, less coordination overhead, and fewer missed opportunities to help.**
 
 Foodbridge brings donors and food pantries together by turning a simple message into a coordinated donation.
+
+
+### Run the Photon donor-choice flow
+
+Start the backend with `.venv/bin/python backend/pantrypulse_service.py`, then
+run `npx tsx src/index.ts` from `photon-test` (with the Spectrum dependencies
+installed). `src/pantrypulse.ts` uses the same flow. Configure `GEMINI_API_KEY`
+and the Spectrum project credentials in your environment or `.env`.
+
+A donor texts `JOIN DONOR`, then a message such as `24 unopened cans of beans`.
+The bridge sends the description to `backend/search.py`, which parses the item
+and recommends up to three pantries. The backend collects missing ZIP,
+drop-off day/time, and packaging confirmation, then sends the numbered pantry
+options. Guided `DONATE` intake uses the same pantry recommendation logic.
+
+Reply `PROCEED 2` to choose option 2, or `PROCEED 104 2` to choose option 2 for
+donation 104 when several donations are pending. `PROCEED` alone selects option
+1 when exactly one donation is awaiting a choice. No pantry receives an offer
+until the donor chooses. Choices are saved across backend restarts.
+
+The selected pantry must be registered in the Photon demo, open during the
+handoff window, and have enough remaining need for the donation. Otherwise the
+donor can choose another option or cancel. The existing pantry commands
+`ACCEPT <id>`, `PASS <id>`, and `RECEIVED <id>` continue to work; a pass or offer
+expiry still advances to the next eligible pantry as before. Search currently
+parses one food item per message.

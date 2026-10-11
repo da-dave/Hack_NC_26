@@ -17,7 +17,7 @@ from pantrypulse_time import parse_day, parse_time_window
 TZ = ZoneInfo("America/New_York")
 SCHEMAS = {
     "participants": ["handle", "space_id", "role", "pantry_id", "name", "address", "zip", "hours", "step", "draft"],
-    "donations": ["id", "donor", "item", "quantity", "unit", "zip", "start", "end", "packaging", "status", "pantry_id", "created"],
+    "donations": ["id", "donor", "item", "quantity", "unit", "zip", "start", "end", "packaging", "status", "pantry_id", "created", "recommendations"],
     "offers": ["id", "donation_id", "pantry_id", "status", "created", "expires", "resolved", "reminded"],
     "inbox": ["message_key"],
     "outbox": ["id", "recipient", "text", "sent"],
@@ -59,6 +59,9 @@ class PantryPulse:
             path = self.dir / f"pp_{name}.csv"
             if path.exists():
                 self.tables[name] = pd.read_csv(path, dtype=str, keep_default_na=False).to_dict("records")
+                for row in self.tables[name]:
+                    for column in cols:
+                        row.setdefault(column, "")
             else:
                 self.tables[name] = []
                 self._write(name)
@@ -177,7 +180,7 @@ class PantryPulse:
     def begin_donation(self, p):
         p["step"] = "donation_item"
         p["draft"] = "{}"
-        self.notify(p["handle"], "What food are you donating? (Example: canned beans)")
+        self.notify(p["handle"], "Describe one food donation, including quantity (example: 24 unopened cans of beans), or enter just the food name for guided entry.")
 
     def _finish_donation_time(self, p, draft, a, b):
         """Return done, next (ask packaging), or invalid."""
@@ -294,7 +297,7 @@ class PantryPulse:
         """Start guided intake from Gemini output; save state across messages.
 
         Gemini extracts; this backend validates categories, quantities, units,
-        and later makes all matching decisions.
+        and preserves search.py recommendations for the donor to choose.
         """
         key = f"{space_id}|{message_id}"
         if self.lookup("inbox", message_key=key):
@@ -317,7 +320,8 @@ class PantryPulse:
                 given_unit = str(item.get("unit") or "").strip()
                 if given_unit and given_unit.casefold() != canonical_unit.casefold():
                     raise ValueError(f"For {name}, please use quantities in {canonical_unit}.")
-                accepted.append({"item": names[name.lower()], "quantity": int(value), "unit": canonical_unit})
+                accepted.append({"item": names[name.lower()], "quantity": int(value), "unit": canonical_unit,
+                                 **({"recommendations": item["recommendations"]} if "recommendations" in item else {})})
             if not accepted:
                 raise ValueError("No recognizable donated items. Reply DONATE to use guided entry.")
             draft = {"items": accepted}
@@ -363,10 +367,18 @@ class PantryPulse:
         if matching.empty or qty <= 0 or not re.fullmatch(r"\d{5}", zip_code) or not (start < end) or end <= datetime.now(TZ) + timedelta(minutes=self.buffer_minutes) or packaging not in ("unopened", "sealed"):
             raise ValueError("Invalid donation item, quantity, ZIP, drop-off window, or packaging")
         unit = matching.iloc[0]["unit"]
-        donation = {"id": self.next_id("donations"), "donor": donor, "item": item, "quantity": str(qty), "unit": unit, "zip": zip_code, "start": stamp(start), "end": stamp(end), "packaging": packaging, "status": "searching", "pantry_id": "", "created": stamp()}
+        donation = {"id": self.next_id("donations"), "donor": donor, "item": item, "quantity": str(qty), "unit": unit, "zip": zip_code, "start": stamp(start), "end": stamp(end), "packaging": packaging, "status": "searching", "pantry_id": "", "created": stamp(), "recommendations": ""}
         self.tables["donations"].append(donation)
-        self.notify(donor, f"Donation #{donation['id']}: {qty} {unit} of {item}. Drop-off {start.strftime('%b %d %I:%M %p')}–{end.strftime('%I:%M %p')} ET. Looking for a pantry now.")
-        self.next_offer(donation)
+        self.notify(donor, f"Donation #{donation['id']}: {qty} {unit} of {item}. Drop-off {start.strftime('%b %d %I:%M %p')}–{end.strftime('%I:%M %p')} ET. Choose a pantry from the options below.")
+        from search import DonationItem, find_best_pantries, format_message
+        recommendations = fields.get("recommendations")
+        if recommendations is None:
+            recommendations = find_best_pantries(item, self.dir)
+        donation["recommendations"] = json.dumps(recommendations)
+        donation["status"] = "awaiting_choice" if recommendations else "unmatched"
+        self.notify(donor, f"Donation #{donation['id']} pantry options:\n" + format_message(
+            DonationItem(food_item=item, quantity=qty, unit=unit), recommendations
+        ) + (f"\nFor this donation, you can also reply PROCEED {donation['id']} <option number>." if recommendations else ""))
         return donation["id"]
 
     def pantry_open(self, p, start: datetime, end: datetime) -> bool:
@@ -402,7 +414,37 @@ class PantryPulse:
                 base -= int(d["quantity"])
         return max(base, 0)
 
-    def next_offer(self, donation):
+    def choose_pantry(self, p, message):
+        parts = message.split()
+        waiting = [d for d in self.tables["donations"]
+                   if d["donor"] == p["handle"] and d["status"] == "awaiting_choice"]
+        if len(parts) == 3:
+            donation = next((d for d in waiting if d["id"] == parts[1].lstrip("#")), None)
+            choice = parts[2]
+        elif len(parts) in (1, 2) and len(waiting) == 1:
+            donation = waiting[0]
+            choice = parts[1] if len(parts) == 2 else "1"
+        else:
+            self.notify(p["handle"], "Reply PROCEED <donation ID> <option number> to select a pantry for a pending donation.")
+            return
+        if not donation:
+            self.notify(p["handle"], "No donation awaiting your choice has that ID.")
+            return
+        options = json.loads(donation["recommendations"] or "[]")
+        if not choice.isdigit() or not 1 <= int(choice) <= len(options):
+            self.notify(p["handle"], f"Choose an option from 1 to {len(options)}.")
+            return
+        pid = str(options[int(choice) - 1]["pantry_id"])
+        receiver = self.lookup("participants", role="pantry", pantry_id=pid)
+        if (not receiver or not self.pantry_open(receiver, parse_dt(donation["start"]), parse_dt(donation["end"]))
+                or self.need(pid, donation["item"]) < int(donation["quantity"])):
+            self.notify(p["handle"], "That pantry isn't registered or can't accept this donation during your window. Choose another option, or CANCEL the donation.")
+            return
+        self.next_offer(donation, preferred_id=pid)
+        if donation["status"] == "offered":
+            self.notify(p["handle"], f"Contacting {options[int(choice) - 1]['pantry_name']} for donation #{donation['id']}. I’ll let you know when they respond.")
+
+    def next_offer(self, donation, preferred_id=None):
         now = datetime.now(TZ)
         if parse_dt(donation["end"]) <= now + timedelta(minutes=self.buffer_minutes):
             donation["status"] = "expired"
@@ -421,7 +463,7 @@ class PantryPulse:
             donation["status"] = "unmatched"
             self.notify(donation["donor"], f"No remaining participating demo pantries can accept all of donation #{donation['id']}. Reply STATUS for details.")
             return
-        _, pid, p = options[0]
+        _, pid, p = next((option for option in options if option[1] == preferred_id), options[0])
         expiry = min(now + timedelta(minutes=self.offer_minutes), parse_dt(donation["end"]) - timedelta(minutes=self.buffer_minutes))
         if expiry <= now:
             donation["status"] = "expired"
@@ -530,7 +572,7 @@ class PantryPulse:
                 if p: self.notify(p["handle"], f"Offer #{o['donation_id']} expired.")
                 if d and d["status"] == "offered": self.next_offer(d)
         for d in self.tables["donations"]:
-            if d["status"] in ("searching", "offered", "reserved") and parse_dt(d["end"]) <= datetime.now(TZ):
+            if d["status"] in ("searching", "awaiting_choice", "offered", "reserved") and parse_dt(d["end"]) <= datetime.now(TZ):
                 d["status"] = "expired"
                 for o in self.by("offers", donation_id=d["id"]):
                     if o["status"] == "pending": o.update(status="expired", resolved=stamp())
@@ -545,7 +587,7 @@ class PantryPulse:
         upper = message.upper()
         # Commands that can interrupt a staged conversation.
         if upper == "HELP":
-            self.notify(handle, "PantryPulse: JOIN DONOR, JOIN PANTRY, DONATE, STATUS DONATIONS, STATUS PANTRY, INVENTORY, CANCEL <id>, EDIT <id>, ACCEPT <id>, PASS <id>, RECEIVED <id>.")
+            self.notify(handle, "PantryPulse: JOIN DONOR, JOIN PANTRY, DONATE, PROCEED <option>, STATUS DONATIONS, STATUS PANTRY, INVENTORY, CANCEL <id>, EDIT <id>, ACCEPT <id>, PASS <id>, RECEIVED <id>.")
         elif upper == "JOIN PANTRY":
             self.start_pantry(p)
         elif upper == "JOIN DONOR":
@@ -581,6 +623,8 @@ class PantryPulse:
             self.notify(handle, f"Which donation? Reply {upper} <donation ID> (e.g. {upper} 104).")
         elif not p["role"]:
             self.notify(handle, "Welcome to PantryPulse. Text JOIN DONOR or JOIN PANTRY.")
+        elif upper == "PROCEED" or upper.startswith("PROCEED "):
+            self.choose_pantry(p, upper)
         elif upper == "DONATE":
             self.begin_donation(p)
         elif p["step"].startswith("donation_"):

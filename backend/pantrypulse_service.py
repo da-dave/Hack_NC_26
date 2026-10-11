@@ -59,6 +59,8 @@ class Handler(BaseHTTPRequestHandler):
                         if not isinstance(payload.get(field), str) or not payload[field]:
                             raise ValueError(f"Missing {field}")
                     args = {k: payload[k] for k in ("handle", "space_id", "message_id", "text")}
+                    if app.lookup("inbox", message_key=f"{args['space_id']}|{args['message_id']}"):
+                        return self.respond({"ok": True})
                     if should_interpret(app, args["handle"], args["text"]):
                         try:
                             parsed = parse_donation(args["text"])

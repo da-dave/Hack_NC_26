@@ -1,9 +1,4 @@
-"""Adapter for teammates' Gemini modules; no model selection or matching decisions here.
-
-The multi-item parser already exists in backend/arch/search.py (gemini-imp).
-The newer backend/search.py parser handles one item, so we prefer multi-item
-parsing for PantryPulse and fall back to single-item when necessary.
-"""
+"""Connect search.py donor parsing and recommendations to guided handoff intake."""
 from __future__ import annotations
 
 import re
@@ -31,7 +26,7 @@ def should_interpret(app, handle: str, text: str) -> bool:
     p = app.lookup("participants", handle=handle)
     if not p or p.get("role") not in ("donor", "pantry"):
         return False
-    if p.get("step"):
+    if p.get("step") and p["step"] != "donation_item":
         return False
     msg = text.strip()
     if not msg or _COMMAND.fullmatch(msg):
@@ -44,30 +39,13 @@ def should_interpret(app, handle: str, text: str) -> bool:
 
 
 def parse_donation(text: str) -> ParsedIntake:
-    # The archived Gemini module is the only existing team parser that supports
-    # multiple food types. Do not use its matching/recommendation function:
-    # PantryPulse's engine owns the eligibility and reservation rules.
-    try:
-        from arch.search import parse_donor_message
-        parsed = parse_donor_message(text)
-        items = [
-            {"item": x.food_item, "quantity": x.quantity, "unit": x.unit or ""}
-            for x in parsed.items
-        ]
-        location = parsed.donor_location or ""
-        availability = parsed.availability or ""
-    except (ImportError, AttributeError):
-        # Compatibility with the new single-item gemini-imp search.py.
-        from search import gemini_parse
-        x = gemini_parse(text)
-        items = [{"item": x.food_item, "quantity": x.quantity, "unit": x.unit or ""}]
-        location = ""
-        availability = ""
-
-    if not items or len(items) > 20:
-        raise ValueError("Gemini didn't identify 1–20 food items")
-    zip_match = _ZIP.search(f"{text} {location}")
-    window_match = _DATE_WINDOW.search(f"{text} {availability}")
+    from search import search
+    result = search(text)
+    x = result["donation"]
+    items = [{"item": x["food_item"], "quantity": x["quantity"],
+              "unit": x.get("unit") or "", "recommendations": result["matches"]}]
+    zip_match = _ZIP.search(text)
+    window_match = _DATE_WINDOW.search(text)
     return ParsedIntake(
         items=items,
         zip_code=zip_match.group(1) if zip_match else "",

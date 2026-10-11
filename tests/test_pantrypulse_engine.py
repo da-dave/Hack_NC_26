@@ -44,7 +44,16 @@ class MVPTests(unittest.TestCase):
         future = (datetime.now(TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
         self.send("donor", future + " 12:00-15:00")
         self.send("donor", "YES")
-        return self.app.tables["donations"][-1]
+        d = self.app.tables["donations"][-1]
+        self.assertEqual(d["status"], "awaiting_choice")
+        self.assertEqual(len(self.app.tables["offers"]), 0)
+        # Choose the highest-ranked registered pantry.
+        import json
+        options = json.loads(d["recommendations"])
+        option = next(i for i, row in enumerate(options, 1)
+                      if self.app.lookup("participants", role="pantry", pantry_id=str(row["pantry_id"])))
+        self.send("donor", f"PROCEED {option}")
+        return d
 
     def test_pantry_registration_roles(self):
         self.register_pantry("a")
@@ -73,6 +82,49 @@ class MVPTests(unittest.TestCase):
         self.assertEqual(d["status"], "completed")
         self.send("donor", "STATUS DONATIONS")
         self.assertTrue(any(d['id'] in x['text'] and x['recipient'] == 'donor' for x in self.app.tables['outbox']))
+
+    def test_donor_can_choose_backup_and_choice_survives_reload(self):
+        self.register_pantry("a")
+        self.register_pantry("b")
+        self.create()
+        first = self.app.tables["donations"][-1]
+        self.send("donor", "CANCEL " + first["id"])
+        self.send("donor", "DONATE")
+        for message in ("beans", "24", "27514",
+                        (datetime.now(TZ) + timedelta(days=1)).strftime("%Y-%m-%d") + " 12:00-15:00", "YES"):
+            self.send("donor", message)
+        d = self.app.tables["donations"][-1]
+        self.app = PantryPulse(self.path)
+        d = self.app.lookup("donations", id=d["id"])
+        self.send("donor", "PROCEED 9")
+        self.assertEqual(d["status"], "awaiting_choice")
+        self.send("stranger", f"PROCEED {d['id']} 2")
+        self.assertEqual(d["status"], "awaiting_choice")
+        self.send("donor", "PROCEED 2")
+        self.assertEqual(self.app.tables["offers"][-1]["pantry_id"], "1")
+        count = len(self.app.tables["offers"])
+        self.send("donor", "PROCEED 2")
+        self.assertEqual(len(self.app.tables["offers"]), count)
+        self.send("a", f"ACCEPT {d['id']}")
+        self.send("a", f"RECEIVED {d['id']}")
+        self.assertEqual(d["status"], "completed")
+
+    def test_unregistered_choice_does_not_contact_another_pantry(self):
+        self.register_pantry("a")
+        d = self.create()
+        self.send("donor", "CANCEL " + d["id"])
+        self.send("donor", "DONATE")
+        for message in ("beans", "24", "27514",
+                        (datetime.now(TZ) + timedelta(days=1)).strftime("%Y-%m-%d") + " 12:00-15:00", "YES"):
+            self.send("donor", message)
+        d = self.app.tables["donations"][-1]
+        count = len(self.app.tables["offers"])
+        self.send("donor", "PROCEED 1")  # pantry 2 is highest-ranked but unregistered
+        self.assertEqual(d["status"], "awaiting_choice")
+        self.assertEqual(len(self.app.tables["offers"]), count)
+        self.send("donor", "PROCEED 2")
+        self.assertEqual(d["status"], "offered")
+        self.assertEqual(self.app.tables["offers"][-1]["pantry_id"], "1")
 
     def test_duplicate_event(self):
         self.send("donor", "JOIN DONOR")

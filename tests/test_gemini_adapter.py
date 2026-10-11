@@ -14,19 +14,19 @@ from pantrypulse_gemini import parse_donation, should_interpret
 
 
 class GeminiAdapterTests(unittest.TestCase):
-    def test_extracts_multiple_items_location_window_packaging(self):
-        archive = types.ModuleType('arch.search')
-        archive.parse_donor_message = lambda _: SimpleNamespace(
-            items=[SimpleNamespace(food_item='Canned beans',quantity=24,unit='cans'),
-                   SimpleNamespace(food_item='Pasta', quantity=8, unit='boxes')],
-            donor_location='27514', availability='2026-10-14 12:00-16:00',
-        )
-        with patch.dict(sys.modules, {'arch.search':archive}):
-            p = parse_donation('I have 24 unopened cans of beans and 8 boxes of pasta in 27514 for 2026-10-14 12:00-16:00')
-        self.assertEqual(len(p.items),2)
-        self.assertEqual(p.zip_code,'27514')
-        self.assertEqual(p.window,'2026-10-14 12:00-16:00')
-        self.assertTrue(p.packaging_verified)
+    def test_uses_search_results_and_preserves_recommendations(self):
+        matches = [{"pantry_id": 2, "pantry_name": "Demo", "reason": "needed"}]
+        with patch('search.search', return_value={
+            "donation": {"food_item": "Canned beans", "quantity": 24, "unit": "cans"},
+            "matches": matches, "message": "Options",
+        }) as search:
+            message = 'I have 24 unopened cans of beans in 27514 for 2026-10-14 12:00-16:00'
+            parsed = parse_donation(message)
+        search.assert_called_once_with(message)
+        self.assertEqual(parsed.items[0]["recommendations"], matches)
+        self.assertEqual(parsed.zip_code, '27514')
+        self.assertEqual(parsed.window, '2026-10-14 12:00-16:00')
+        self.assertTrue(parsed.packaging_verified)
 
     def test_detects_only_donation_intake(self):
         with tempfile.TemporaryDirectory() as tmp:
