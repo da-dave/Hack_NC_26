@@ -1,0 +1,31 @@
+pledge_id,donor_id,pantry_id,food_item,quantity,unit,available_date,status
+1,1,8,Pasta,68,boxes,2026-10-10,delivered
+2,2,7,Canned fruit,74,cans,2026-10-10,pending
+3,3,8,Rice,43,bags,2026-10-10,approved
+4,4,4,Canned fruit,49,cans,2026-10-10,approved
+5,5,4,Pasta,54,boxes,2026-10-11,delivered
+6,6,7,Peanut butter,69,jars,2026-10-12,rejected
+7,7,3,Oatmeal,93,containers,2026-10-12,pending
+8,8,1,Pasta,87,boxes,2026-10-11,approved
+9,9,3,Cereal,34,boxes,2026-10-10,pending
+10,10,8,Peanut butter,91,jars,2026-10-11,approved
+11,11,9,Cereal,16,boxes,2026-10-12,approved
+12,12,9,Cereal,47,boxes,2026-10-12,rejected
+13,13,6,Shelf-stable milk,79,cartons,2026-10-11,delivered
+14,14,1,Oatmeal,22,containers,2026-10-11,delivered
+15,15,4,Canned vegetables,100,cans,2026-10-12,delivered
+16,16,8,Shelf-stable milk,84,cartons,2026-10-11,approved
+17,17,10,Canned beans,51,cans,2026-10-10,pending
+18,18,2,Canned vegetables,16,cans,2026-10-12,approved
+19,19,9,Canned vegetables,89,cans,2026-10-10,rejected
+20,20,8,Canned fruit,11,cans,2026-10-12,pending
+21,21,4,Canned tuna,77,cans,2026-10-10,approved
+22,22,7,Canned beans,23,cans,2026-10-11,approved
+23,23,8,Cereal,79,boxes,2026-10-10,delivered
+24,24,1,Pasta,70,boxes,2026-10-10,approved
+25,25,3,Peanut butter,22,jars,2026-10-10,approved
+26,26,2,Peanut butter,25,jars,2026-10-11,pending
+27,27,1,Oatmeal,79,containers,2026-10-11,delivered
+28,28,6,Canned tuna,99,cans,2026-10-11,approved
+29,29,10,Cereal,42,boxes,2026-10-11,approved
+30,30,7,Peanut butter,19,jars,2026-10-12,rejected
